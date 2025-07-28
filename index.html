@@ -17,7 +17,7 @@
       padding-bottom: 10px;
     }
     .chart-wrapper {
-      min-width: 600px; /* giúp có thanh cuộn nếu vượt quá màn hình nhỏ */
+      min-width: 600px;
     }
     canvas {
       background: white;
@@ -47,7 +47,6 @@
 <body>
   <h1>📊 Dashboard giám sát pH</h1>
 
-  <!-- Biểu đồ 1: Dữ liệu thời gian thực -->
   <div class="chart-block">
     <h2>1️⃣ Biểu đồ thời gian thực</h2>
     <div class="chart-scroll"><div class="chart-wrapper">
@@ -57,7 +56,6 @@
     <button onclick="downloadCSV()">📄 Tải dữ liệu CSV</button>
   </div>
 
-  <!-- Biểu đồ 2: Trung bình trượt -->
   <div class="chart-block">
     <h2>2️⃣ Biểu đồ trung bình trượt</h2>
     <div class="chart-scroll"><div class="chart-wrapper">
@@ -66,7 +64,6 @@
     <button onclick="exportChart('avgRollingChart')">📥 Tải ảnh biểu đồ 2</button>
   </div>
 
-  <!-- Biểu đồ 3: Trung bình pH theo giờ -->
   <div class="chart-block">
     <h2>3️⃣ Biểu đồ trung bình pH theo 24 giờ</h2>
     <div class="chart-scroll"><div class="chart-wrapper">
@@ -76,7 +73,6 @@
     <div id="avgDateLabel" style="font-style: italic; margin-top: 5px;"></div>
   </div>
 
-  <!-- Script biểu đồ -->
   <script>
     const apiUrl = "https://api.thingspeak.com/channels/2987877/feeds.json?api_key=O9QSTEUK3OAJGEPX&results=200";
     let realTimeChart, avgRollingChart, avgHourChart;
@@ -130,44 +126,55 @@
       document.body.removeChild(link);
     }
 
+    function mergeAndStoreLocal(data) {
+      const today = new Date().toISOString().split('T')[0];
+      const key = 'ph_data_' + today;
+      let saved = localStorage.getItem(key);
+      let combined = data;
+      if (saved) {
+        const old = JSON.parse(saved);
+        const map = new Map(old.map(item => [item.time, item]));
+        data.forEach(d => map.set(d.time, d));
+        combined = Array.from(map.values()).sort((a, b) => new Date(a.time) - new Date(b.time));
+      }
+      localStorage.setItem(key, JSON.stringify(combined));
+      return combined;
+    }
+
     function updateCharts() {
       fetch(apiUrl)
         .then(res => res.json())
         .then(data => {
           const feeds = data.feeds;
-          lastData = feeds.map(f => ({
+          let currentData = feeds.map(f => ({
             time: new Date(f.created_at).toLocaleString(),
             dateObj: new Date(f.created_at),
             ph: parseFloat(f.field1)
           })).filter(f => !isNaN(f.ph));
 
+          lastData = mergeAndStoreLocal(currentData);
+
           const timeLabels = lastData.map(f => f.time);
           const phValues = lastData.map(f => f.ph);
           const avgValues = movingAverage(phValues);
 
-          // Biểu đồ 1: thời gian thực
+          const commonOptions = {
+            responsive: true,
+            plugins: {
+              legend: { display: false },
+              tooltip: { enabled: true }
+            },
+            scales: {
+              y: { suggestedMin: 5, suggestedMax: 9, title: { display: true, text: 'pH' } },
+              x: { title: { display: true, text: 'Thời gian' } }
+            }
+          };
+
           if (!realTimeChart) {
             realTimeChart = new Chart(document.getElementById('realTimeChart').getContext('2d'), {
               type: 'line',
-              data: {
-                labels: timeLabels,
-                datasets: [{
-                  label: 'pH thời gian thực',
-                  data: phValues,
-                  borderColor: 'blue',
-                  backgroundColor: 'rgba(0,0,255,0.1)',
-                  fill: true,
-                  tension: 0.3
-                }]
-              },
-              options: {
-                responsive: true,
-                plugins: { legend: { display: false } },
-                scales: {
-                  y: { suggestedMin: 5, suggestedMax: 9, title: { display: true, text: 'pH' } },
-                  x: { title: { display: true, text: 'Thời gian' } }
-                }
-              }
+              data: { labels: timeLabels, datasets: [{ data: phValues, borderColor: 'blue', backgroundColor: 'rgba(0,0,255,0.1)', fill: true, tension: 0.3 }] },
+              options: commonOptions
             });
           } else {
             realTimeChart.data.labels = timeLabels;
@@ -175,29 +182,11 @@
             realTimeChart.update();
           }
 
-          // Biểu đồ 2: trung bình trượt
           if (!avgRollingChart) {
             avgRollingChart = new Chart(document.getElementById('avgRollingChart').getContext('2d'), {
               type: 'line',
-              data: {
-                labels: timeLabels,
-                datasets: [{
-                  label: 'pH trung bình trượt',
-                  data: avgValues,
-                  borderColor: 'green',
-                  backgroundColor: 'rgba(0,255,0,0.1)',
-                  fill: true,
-                  tension: 0.3
-                }]
-              },
-              options: {
-                responsive: true,
-                plugins: { legend: { display: false } },
-                scales: {
-                  y: { suggestedMin: 5, suggestedMax: 9, title: { display: true, text: 'pH' } },
-                  x: { title: { display: true, text: 'Thời gian' } }
-                }
-              }
+              data: { labels: timeLabels, datasets: [{ data: avgValues, borderColor: 'green', backgroundColor: 'rgba(0,255,0,0.1)', fill: true, tension: 0.3 }] },
+              options: commonOptions
             });
           } else {
             avgRollingChart.data.labels = timeLabels;
@@ -205,31 +194,18 @@
             avgRollingChart.update();
           }
 
-          // Biểu đồ 3: trung bình theo giờ
           const hourlyData = Array(24).fill().map(() => []);
-          lastData.forEach(d => {
-            const hour = d.dateObj.getHours();
-            hourlyData[hour].push(d.ph);
-          });
-
+          lastData.forEach(d => hourlyData[d.dateObj.getHours()].push(d.ph));
           const labels = Array.from({ length: 24 }, (_, i) => `${i}h`);
           const avgPH = hourlyData.map(arr => arr.length ? parseFloat(calcAverage(arr)) : null);
           const barColors = avgPH.map(ph => ph !== null ? getColor(ph) : 'gray');
 
-          const dateLabel = feeds[0] ? new Date(feeds[0].created_at).toLocaleDateString() : '';
-          document.getElementById('avgDateLabel').innerText = `📅 Dữ liệu ngày: ${dateLabel}`;
+          document.getElementById('avgDateLabel').innerText = `📅 Dữ liệu ngày: ${lastData[0]?.dateObj.toLocaleDateString()}`;
 
           if (!avgHourChart) {
             avgHourChart = new Chart(document.getElementById('avgHourChart').getContext('2d'), {
               type: 'bar',
-              data: {
-                labels: labels,
-                datasets: [{
-                  label: 'Trung bình pH',
-                  data: avgPH,
-                  backgroundColor: barColors
-                }]
-              },
+              data: { labels, datasets: [{ data: avgPH, backgroundColor: barColors }] },
               options: {
                 responsive: true,
                 plugins: {
@@ -240,10 +216,7 @@
                   },
                   legend: { display: false },
                   datalabels: {
-                    anchor: 'end',
-                    align: 'end',
-                    color: '#000',
-                    font: { weight: 'bold', size: 10 },
+                    anchor: 'end', align: 'end', color: '#000', font: { weight: 'bold', size: 10 },
                     formatter: val => val !== null ? val : ''
                   }
                 },
@@ -265,8 +238,7 @@
     }
 
     updateCharts();
-    setInterval(updateCharts,  60 * 1000);
+    setInterval(updateCharts, 60000);
   </script>
 </body>
 </html>
-
