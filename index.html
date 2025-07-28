@@ -7,40 +7,49 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: #f9f9f9;
-      margin: 20px;
+  body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+  }
+
+  .container {
+    padding: 16px;
+  }
+
+  .chart-container {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin-bottom: 20px;
+  }
+
+  canvas {
+    min-width: 600px;
+    max-width: 100%;
+    height: 300px;
+  }
+
+  button {
+    margin-top: 10px;
+    padding: 6px 12px;
+    font-size: 14px;
+  }
+
+  @media screen and (max-width: 768px) {
+    h2 {
+      font-size: 16px;
     }
-    h1 {
-      color: #2c3e50;
+
+    canvas {
+      height: 250px;
     }
-    .chart-block {
-      background: #fff;
-      padding: 15px;
-      margin-bottom: 30px;
-      border-radius: 8px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-    }
-    .chart-wrapper {
-      position: relative;
-      height: 400px;
-      width: 100%;
-    }
-    .chart-scroll {
-      overflow-x: auto;
-    }
+
     button {
-      padding: 6px 10px;
-      margin: 6px 4px 0 0;
-      background: #3498db;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 14px;
+      font-size: 13px;
     }
-  </style>
+  }
+</style>
 </head>
 <body>
   <h1>📊 Dashboard giám sát pH</h1>
