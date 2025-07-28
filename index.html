@@ -105,7 +105,7 @@
   </div>
 
   <script>
-    const apiUrl = "https://api.thingspeak.com/channels/2987877/feeds.json?api_key=O9QSTEUK3OAJGEPX&results=200";
+    const apiUrl = "https://api.thingspeak.com/channels/2987877/feeds.json?results=200";
     let realTimeChart, avgRollingChart, avgHourChart;
     let lastData = [];
 
@@ -158,35 +158,15 @@
       localStorage.setItem("phDataCache", JSON.stringify(cache));
     }
 
-    function loadDataFromCache() {
-      const cache = localStorage.getItem("phDataCache");
-      if (!cache) return null;
-
-      const { timestamp, feeds } = JSON.parse(cache);
-      const now = Date.now();
-
-      if (now - timestamp > 24 * 60 * 60 * 1000) {
-        localStorage.removeItem("phDataCache");
-        return null;
-      }
-
-      return feeds;
-    }
-
     function updateCharts() {
-      const cachedFeeds = loadDataFromCache();
-
-      if (cachedFeeds) {
-        processData({ feeds: cachedFeeds });
-      } else {
-        fetch(apiUrl)
-          .then(res => res.json())
-          .then(data => {
-            saveDataToCache(data);
-            processData(data);
-          })
-          .catch(err => console.error("Lỗi tải dữ liệu:", err));
-      }
+      // ✅ Luôn tải dữ liệu mới từ ThingSpeak
+      fetch(apiUrl)
+        .then(res => res.json())
+        .then(data => {
+          saveDataToCache(data); // vẫn lưu lại nếu sau này muốn dùng cache
+          processData(data);
+        })
+        .catch(err => console.error("Lỗi tải dữ liệu:", err));
     }
 
     function processData(data) {
