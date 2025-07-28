@@ -2,7 +2,7 @@
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
-  <title>Dashboard pH – Thời gian thực & Trung bình theo giờ</title>
+  <title>Dashboard pH – 3 Biểu đồ</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
@@ -49,19 +49,24 @@
     <button onclick="downloadCSV()">📄 Tải dữ liệu CSV</button>
   </div>
 
-  <!-- Biểu đồ 2: Trung bình pH theo 24 giờ -->
+  <!-- Biểu đồ 2: Trung bình trượt theo thời gian -->
   <div class="chart-block">
-    <h2>2️⃣ Biểu đồ trung bình pH theo 24 giờ</h2>
+    <h2>2️⃣ Biểu đồ trung bình trượt</h2>
+    <canvas id="avgRollingChart"></canvas>
+    <button onclick="exportChart('avgRollingChart')">📥 Tải ảnh biểu đồ 2</button>
+  </div>
+
+  <!-- Biểu đồ 3: Trung bình pH theo 24 giờ -->
+  <div class="chart-block">
+    <h2>3️⃣ Biểu đồ trung bình pH theo 24 giờ</h2>
     <canvas id="avgHourChart"></canvas>
-    <button onclick="exportChart('avgHourChart')">📥 Tải ảnh biểu đồ 2</button>
+    <button onclick="exportChart('avgHourChart')">📥 Tải ảnh biểu đồ 3</button>
     <div id="avgDateLabel" style="font-style: italic; margin-top: 5px;"></div>
   </div>
 
   <script>
     const apiUrl = "https://api.thingspeak.com/channels/2987877/feeds.json?api_key=O9QSTEUK3OAJGEPX&results=200";
-
-    let realTimeChart;
-    let avgHourChart;
+    let realTimeChart, avgRollingChart, avgHourChart;
     let lastData = [];
 
     function extractHour(dateStr) {
@@ -71,6 +76,16 @@
     function calcAverage(arr) {
       const sum = arr.reduce((a, b) => a + b, 0);
       return (sum / arr.length).toFixed(2);
+    }
+
+    function movingAverage(data, windowSize = 5) {
+      const result = [];
+      for (let i = 0; i < data.length; i++) {
+        const windowData = data.slice(Math.max(i - windowSize + 1, 0), i + 1);
+        const avg = windowData.reduce((sum, val) => sum + val, 0) / windowData.length;
+        result.push(avg.toFixed(2));
+      }
+      return result;
     }
 
     function getColor(ph) {
@@ -92,13 +107,11 @@
       lastData.forEach(row => {
         csv += `${row.time},${row.ph}\n`;
       });
-
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
       const link = document.createElement("a");
       const url = URL.createObjectURL(blob);
       link.setAttribute("href", url);
       link.setAttribute("download", "du_lieu_pH.csv");
-      link.style.display = "none";
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -111,16 +124,17 @@
           const feeds = data.feeds;
           lastData = feeds.map(f => ({
             time: new Date(f.created_at).toLocaleString(),
+            dateObj: new Date(f.created_at),
             ph: parseFloat(f.field1)
           })).filter(f => !isNaN(f.ph));
 
-          // Biểu đồ 1 – Thời gian thực
           const timeLabels = lastData.map(f => f.time);
           const phValues = lastData.map(f => f.ph);
+          const avgValues = movingAverage(phValues);
 
+          // Biểu đồ 1: thời gian thực
           if (!realTimeChart) {
-            const ctx1 = document.getElementById('realTimeChart').getContext('2d');
-            realTimeChart = new Chart(ctx1, {
+            realTimeChart = new Chart(document.getElementById('realTimeChart').getContext('2d'), {
               type: 'line',
               data: {
                 labels: timeLabels,
@@ -135,6 +149,7 @@
               },
               options: {
                 responsive: true,
+                plugins: { legend: { display: false } },
                 scales: {
                   y: { suggestedMin: 5, suggestedMax: 9, title: { display: true, text: 'pH' } },
                   x: { title: { display: true, text: 'Thời gian' } }
@@ -147,10 +162,40 @@
             realTimeChart.update();
           }
 
-          // Biểu đồ 2 – Trung bình theo 24h
+          // Biểu đồ 2: trung bình trượt
+          if (!avgRollingChart) {
+            avgRollingChart = new Chart(document.getElementById('avgRollingChart').getContext('2d'), {
+              type: 'line',
+              data: {
+                labels: timeLabels,
+                datasets: [{
+                  label: 'pH trung bình trượt',
+                  data: avgValues,
+                  borderColor: 'green',
+                  backgroundColor: 'rgba(0,255,0,0.1)',
+                  fill: true,
+                  tension: 0.3
+                }]
+              },
+              options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                  y: { suggestedMin: 5, suggestedMax: 9, title: { display: true, text: 'pH' } },
+                  x: { title: { display: true, text: 'Thời gian' } }
+                }
+              }
+            });
+          } else {
+            avgRollingChart.data.labels = timeLabels;
+            avgRollingChart.data.datasets[0].data = avgValues;
+            avgRollingChart.update();
+          }
+
+          // Biểu đồ 3: trung bình theo giờ
           const hourlyData = Array(24).fill().map(() => []);
           lastData.forEach(d => {
-            const hour = new Date(d.time).getHours();
+            const hour = d.dateObj.getHours();
             hourlyData[hour].push(d.ph);
           });
 
@@ -162,8 +207,7 @@
           document.getElementById('avgDateLabel').innerText = `📅 Dữ liệu ngày: ${dateLabel}`;
 
           if (!avgHourChart) {
-            const ctx2 = document.getElementById('avgHourChart').getContext('2d');
-            avgHourChart = new Chart(ctx2, {
+            avgHourChart = new Chart(document.getElementById('avgHourChart').getContext('2d'), {
               type: 'bar',
               data: {
                 labels: labels,
@@ -204,13 +248,11 @@
             avgHourChart.update();
           }
         })
-        .catch(err => {
-          console.error("Lỗi tải dữ liệu:", err);
-        });
+        .catch(err => console.error("Lỗi tải dữ liệu:", err));
     }
 
-    updateCharts();               // Tải lần đầu
-    setInterval(updateCharts, 300000);  // Tự động cập nhật mỗi 5 phút (300,000 ms)
+    updateCharts();
+    setInterval(updateCharts, 300000);
   </script>
 </body>
 </html>
