@@ -45,7 +45,6 @@
 <body>
   <h1>📊 Dashboard giám sát pH</h1>
 
-  <!-- Biểu đồ 1: Dữ liệu thời gian thực -->
   <div class="chart-block">
     <h2>1⃣ Biểu đồ thời gian thực</h2>
     <div class="chart-scroll"><div class="chart-wrapper">
@@ -55,7 +54,6 @@
     <button onclick="downloadCSV()">📄 Tải dữ liệu CSV</button>
   </div>
 
-  <!-- Biểu đồ 2: Trung bình trượt -->
   <div class="chart-block">
     <h2>2⃣ Biểu đồ trung bình trượt</h2>
     <div class="chart-scroll"><div class="chart-wrapper">
@@ -64,7 +62,6 @@
     <button onclick="exportChart('avgRollingChart')">📅 Tải ảnh biểu đồ 2</button>
   </div>
 
-  <!-- Biểu đồ 3: Trung bình pH theo giờ -->
   <div class="chart-block">
     <h2>3⃣ Biểu đồ trung bình pH theo 24 giờ</h2>
     <div class="chart-scroll"><div class="chart-wrapper">
@@ -120,132 +117,166 @@
       link.click();
     }
 
+    function saveDataToCache(data) {
+      const cache = {
+        timestamp: Date.now(),
+        feeds: data.feeds
+      };
+      localStorage.setItem("phDataCache", JSON.stringify(cache));
+    }
+
+    function loadDataFromCache() {
+      const cache = localStorage.getItem("phDataCache");
+      if (!cache) return null;
+
+      const { timestamp, feeds } = JSON.parse(cache);
+      const now = Date.now();
+
+      if (now - timestamp > 24 * 60 * 60 * 1000) {
+        localStorage.removeItem("phDataCache");
+        return null;
+      }
+
+      return feeds;
+    }
+
     function updateCharts() {
-      fetch(apiUrl)
-        .then(res => res.json())
-        .then(data => {
-          const feeds = data.feeds;
-          lastData = feeds.map(f => ({
-            time: new Date(f.created_at).toLocaleString(),
-            dateObj: new Date(f.created_at),
-            ph: parseFloat(f.field1)
-          })).filter(f => !isNaN(f.ph));
+      const cachedFeeds = loadDataFromCache();
 
-          const timeLabels = lastData.map(f => f.time);
-          const phValues = lastData.map(f => f.ph);
-          const avgValues = movingAverage(phValues);
+      if (cachedFeeds) {
+        processData({ feeds: cachedFeeds });
+      } else {
+        fetch(apiUrl)
+          .then(res => res.json())
+          .then(data => {
+            saveDataToCache(data);
+            processData(data);
+          })
+          .catch(err => console.error("Lỗi tải dữ liệu:", err));
+      }
+    }
 
-          if (!realTimeChart) {
-            realTimeChart = new Chart(document.getElementById('realTimeChart').getContext('2d'), {
-              type: 'line',
-              data: {
-                labels: timeLabels,
-                datasets: [{
-                  label: 'pH thời gian thực',
-                  data: phValues,
-                  borderColor: 'blue',
-                  backgroundColor: 'rgba(0,0,255,0.1)',
-                  fill: true,
-                  tension: 0.3
-                }]
-              },
-              options: {
-                responsive: true,
-                plugins: { legend: { display: false } },
-                scales: {
-                  y: { suggestedMin: 5, suggestedMax: 9, title: { display: true, text: 'pH' } },
-                  x: { title: { display: true, text: 'Thời gian' } }
+    function processData(data) {
+      const feeds = data.feeds;
+      lastData = feeds.map(f => ({
+        time: new Date(f.created_at).toLocaleString(),
+        dateObj: new Date(f.created_at),
+        ph: parseFloat(f.field1)
+      })).filter(f => !isNaN(f.ph));
+
+      const timeLabels = lastData.map(f => f.time);
+      const phValues = lastData.map(f => f.ph);
+      const avgValues = movingAverage(phValues);
+
+      if (!realTimeChart) {
+        realTimeChart = new Chart(document.getElementById('realTimeChart').getContext('2d'), {
+          type: 'line',
+          data: {
+            labels: timeLabels,
+            datasets: [{
+              label: 'pH thời gian thực',
+              data: phValues,
+              borderColor: 'blue',
+              backgroundColor: 'rgba(0,0,255,0.1)',
+              fill: true,
+              tension: 0.3
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+              y: { suggestedMin: 5, suggestedMax: 9, title: { display: true, text: 'pH' } },
+              x: { title: { display: true, text: 'Thời gian' } }
+            }
+          }
+        });
+      } else {
+        realTimeChart.data.labels = timeLabels;
+        realTimeChart.data.datasets[0].data = phValues;
+        realTimeChart.update();
+      }
+
+      if (!avgRollingChart) {
+        avgRollingChart = new Chart(document.getElementById('avgRollingChart').getContext('2d'), {
+          type: 'line',
+          data: {
+            labels: timeLabels,
+            datasets: [{
+              label: 'pH trung bình trượt',
+              data: avgValues,
+              borderColor: 'green',
+              backgroundColor: 'rgba(0,255,0,0.1)',
+              fill: true,
+              tension: 0.3
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+              y: { suggestedMin: 5, suggestedMax: 9, title: { display: true, text: 'pH' } },
+              x: { title: { display: true, text: 'Thời gian' } }
+            }
+          }
+        });
+      } else {
+        avgRollingChart.data.labels = timeLabels;
+        avgRollingChart.data.datasets[0].data = avgValues;
+        avgRollingChart.update();
+      }
+
+      const hourlyData = Array.from({ length: 24 }, () => []);
+      lastData.forEach(d => hourlyData[d.dateObj.getHours()].push(d.ph));
+
+      const labels = Array.from({ length: 24 }, (_, i) => `${i}h`);
+      const avgPH = hourlyData.map(arr => arr.length ? parseFloat(calcAverage(arr)) : null);
+      const barColors = avgPH.map(ph => ph !== null ? getColor(ph) : 'gray');
+
+      const dateLabel = feeds[0] ? new Date(feeds[0].created_at).toLocaleDateString() : '';
+      document.getElementById('avgDateLabel').innerText = `📅 Dữ liệu ngày: ${dateLabel}`;
+
+      if (!avgHourChart) {
+        avgHourChart = new Chart(document.getElementById('avgHourChart').getContext('2d'), {
+          type: 'bar',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Trung bình pH',
+              data: avgPH,
+              backgroundColor: barColors
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              tooltip: {
+                callbacks: {
+                  label: ctx => `Giờ ${ctx.label}: ${ctx.formattedValue}`
                 }
+              },
+              legend: { display: false },
+              datalabels: {
+                anchor: 'end',
+                align: 'end',
+                color: '#000',
+                font: { weight: 'bold', size: 10 },
+                formatter: val => val !== null ? val : ''
               }
-            });
-          } else {
-            realTimeChart.data.labels = timeLabels;
-            realTimeChart.data.datasets[0].data = phValues;
-            realTimeChart.update();
-          }
-
-          if (!avgRollingChart) {
-            avgRollingChart = new Chart(document.getElementById('avgRollingChart').getContext('2d'), {
-              type: 'line',
-              data: {
-                labels: timeLabels,
-                datasets: [{
-                  label: 'pH trung bình trượt',
-                  data: avgValues,
-                  borderColor: 'green',
-                  backgroundColor: 'rgba(0,255,0,0.1)',
-                  fill: true,
-                  tension: 0.3
-                }]
-              },
-              options: {
-                responsive: true,
-                plugins: { legend: { display: false } },
-                scales: {
-                  y: { suggestedMin: 5, suggestedMax: 9, title: { display: true, text: 'pH' } },
-                  x: { title: { display: true, text: 'Thời gian' } }
-                }
-              }
-            });
-          } else {
-            avgRollingChart.data.labels = timeLabels;
-            avgRollingChart.data.datasets[0].data = avgValues;
-            avgRollingChart.update();
-          }
-
-          const hourlyData = Array.from({ length: 24 }, () => []);
-          lastData.forEach(d => hourlyData[d.dateObj.getHours()].push(d.ph));
-
-          const labels = Array.from({ length: 24 }, (_, i) => `${i}h`);
-          const avgPH = hourlyData.map(arr => arr.length ? parseFloat(calcAverage(arr)) : null);
-          const barColors = avgPH.map(ph => ph !== null ? getColor(ph) : 'gray');
-
-          const dateLabel = feeds[0] ? new Date(feeds[0].created_at).toLocaleDateString() : '';
-          document.getElementById('avgDateLabel').innerText = `📅 Dữ liệu ngày: ${dateLabel}`;
-
-          if (!avgHourChart) {
-            avgHourChart = new Chart(document.getElementById('avgHourChart').getContext('2d'), {
-              type: 'bar',
-              data: {
-                labels: labels,
-                datasets: [{
-                  label: 'Trung bình pH',
-                  data: avgPH,
-                  backgroundColor: barColors
-                }]
-              },
-              options: {
-                responsive: true,
-                plugins: {
-                  tooltip: {
-                    callbacks: {
-                      label: ctx => `Giờ ${ctx.label}: ${ctx.formattedValue}`
-                    }
-                  },
-                  legend: { display: false },
-                  datalabels: {
-                    anchor: 'end',
-                    align: 'end',
-                    color: '#000',
-                    font: { weight: 'bold', size: 10 },
-                    formatter: val => val !== null ? val : ''
-                  }
-                },
-                scales: {
-                  y: { suggestedMin: 5, suggestedMax: 9, title: { display: true, text: 'pH' } },
-                  x: { title: { display: true, text: 'Giờ (24h)' } }
-                }
-              },
-              plugins: [ChartDataLabels]
-            });
-          } else {
-            avgHourChart.data.labels = labels;
-            avgHourChart.data.datasets[0].data = avgPH;
-            avgHourChart.data.datasets[0].backgroundColor = barColors;
-            avgHourChart.update();
-          }
-        })
-        .catch(err => console.error("Lỗi tải dữ liệu:", err));
+            },
+            scales: {
+              y: { suggestedMin: 5, suggestedMax: 9, title: { display: true, text: 'pH' } },
+              x: { title: { display: true, text: 'Giờ (24h)' } }
+            }
+          },
+          plugins: [ChartDataLabels]
+        });
+      } else {
+        avgHourChart.data.labels = labels;
+        avgHourChart.data.datasets[0].data = avgPH;
+        avgHourChart.data.datasets[0].backgroundColor = barColors;
+        avgHourChart.update();
+      }
     }
 
     updateCharts();
