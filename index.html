@@ -1,242 +1,255 @@
 <!DOCTYPE html>
-<html lang="en">
-
+<html lang="vi">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Giám sát pH Ao Nuôi</title>
+  <title>Dashboard giám sát pH</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
   <style>
     body {
       font-family: Arial, sans-serif;
-      margin: 0;
-      padding: 0;
+      background: #f9f9f9;
+      margin: 20px;
     }
-
-    .container {
-      padding: 16px;
+    h1 {
+      color: #2c3e50;
     }
-
-    canvas {
-      max-width: 100%;
+    .chart-block {
+      background: #fff;
+      padding: 15px;
+      margin-bottom: 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
     }
-
-    .chart-container {
+    .chart-wrapper {
+      position: relative;
+      height: 400px;
+      width: 100%;
+    }
+    .chart-scroll {
       overflow-x: auto;
     }
-
     button {
-      margin-top: 10px;
-      padding: 6px 12px;
+      padding: 6px 10px;
+      margin: 6px 4px 0 0;
+      background: #3498db;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
       font-size: 14px;
     }
   </style>
 </head>
-
 <body>
-  <div class="container">
-    <h2>Biểu đồ 1: pH theo thời gian thực</h2>
-    <div class="chart-container">
+  <h1>📊 Dashboard giám sát pH</h1>
+
+  <!-- Biểu đồ 1: Dữ liệu thời gian thực -->
+  <div class="chart-block">
+    <h2>1⃣ Biểu đồ thời gian thực</h2>
+    <div class="chart-scroll"><div class="chart-wrapper">
       <canvas id="realTimeChart"></canvas>
-    </div>
+    </div></div>
+    <button onclick="exportChart('realTimeChart')">📅 Tải ảnh biểu đồ 1</button>
+    <button onclick="downloadCSV()">📄 Tải dữ liệu CSV</button>
+  </div>
 
-    <h2>Biểu đồ 2: pH trung bình mỗi phút</h2>
-    <div class="chart-container">
-      <canvas id="avgChart"></canvas>
-    </div>
+  <!-- Biểu đồ 2: Trung bình trượt -->
+  <div class="chart-block">
+    <h2>2⃣ Biểu đồ trung bình trượt</h2>
+    <div class="chart-scroll"><div class="chart-wrapper">
+      <canvas id="avgRollingChart"></canvas>
+    </div></div>
+    <button onclick="exportChart('avgRollingChart')">📅 Tải ảnh biểu đồ 2</button>
+  </div>
 
-    <h2>Biểu đồ 3: Trung bình pH theo 24 giờ</h2>
-    <div class="chart-container">
-      <canvas id="hourlyChart"></canvas>
-    </div>
-
-    <button onclick="downloadCSV()">Tải dữ liệu CSV</button>
+  <!-- Biểu đồ 3: Trung bình pH theo giờ -->
+  <div class="chart-block">
+    <h2>3⃣ Biểu đồ trung bình pH theo 24 giờ</h2>
+    <div class="chart-scroll"><div class="chart-wrapper">
+      <canvas id="avgHourChart"></canvas>
+    </div></div>
+    <button onclick="exportChart('avgHourChart')">📅 Tải ảnh biểu đồ 3</button>
+    <div id="avgDateLabel" style="font-style: italic; margin-top: 5px;"></div>
   </div>
 
   <script>
-    const apiUrl = 'https://api.thingspeak.com/channels/2987877/feeds.json?api_key=O9QSTEUK3OAJGEPX&results=500';
+    const apiUrl = "https://api.thingspeak.com/channels/2987877/feeds.json?api_key=O9QSTEUK3OAJGEPX&results=200";
+    let realTimeChart, avgRollingChart, avgHourChart;
+    let lastData = [];
 
-    let chart1, chart2, chart3;
+    function extractHour(dateStr) {
+      return new Date(dateStr).getHours();
+    }
 
-    function getColor(pH) {
-      if (pH < 6.5) return 'red';
-      if (pH > 8.5) return 'orange';
+    function calcAverage(arr) {
+      const sum = arr.reduce((a, b) => a + b, 0);
+      return (sum / arr.length).toFixed(2);
+    }
+
+    function movingAverage(data, windowSize = 5) {
+      return data.map((_, i) => {
+        const window = data.slice(Math.max(i - windowSize + 1, 0), i + 1);
+        const avg = window.reduce((a, b) => a + b, 0) / window.length;
+        return avg.toFixed(2);
+      });
+    }
+
+    function getColor(ph) {
+      if (ph < 6.5) return 'red';
+      else if (ph > 8.5) return 'orange';
       return 'green';
     }
 
-    function saveToLocalStorage(data) {
-      const today = new Date().toISOString().split('T')[0];
-      localStorage.setItem('ph_data_' + today, JSON.stringify(data));
-    }
-
-    function loadFromLocalStorage() {
-      const today = new Date().toISOString().split('T')[0];
-      return JSON.parse(localStorage.getItem('ph_data_' + today) || '[]');
-    }
-
-    function mergeAndDedup(newData, oldData) {
-      const all = [...oldData, ...newData];
-      const map = {};
-      all.forEach(entry => map[entry.created_at] = entry);
-      return Object.values(map).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-    }
-
-    function fetchDataAndUpdateCharts() {
-      fetch(apiUrl)
-        .then(response => response.json())
-        .then(json => {
-          const feeds = json.feeds.filter(f => f.field1);
-          const oldData = loadFromLocalStorage();
-          const mergedData = mergeAndDedup(feeds, oldData);
-          saveToLocalStorage(mergedData);
-          updateCharts(mergedData);
-        });
-    }
-
-    function updateCharts(feeds) {
-      const labels = feeds.map(feed => new Date(feed.created_at).toLocaleTimeString());
-      const data = feeds.map(feed => parseFloat(feed.field1));
-
-      if (!chart1) {
-        const ctx1 = document.getElementById('realTimeChart').getContext('2d');
-        chart1 = new Chart(ctx1, {
-          type: 'line',
-          data: {
-            labels,
-            datasets: [{
-              label: 'pH',
-              data,
-              borderColor: 'blue',
-              backgroundColor: 'lightblue',
-              pointRadius: 0
-            }]
-          },
-          options: {
-            responsive: true,
-            interaction: { mode: 'index', intersect: false },
-            plugins: { tooltip: { enabled: true }, legend: { display: false } },
-            scales: { x: { display: true }, y: { suggestedMin: 5, suggestedMax: 9 } }
-          }
-        });
-      } else {
-        chart1.data.labels = labels;
-        chart1.data.datasets[0].data = data;
-        chart1.update();
-      }
-
-      // Trung bình mỗi phút (Biểu đồ 2)
-      const avgMap = {};
-      feeds.forEach(f => {
-        const date = new Date(f.created_at);
-        const key = date.getHours() + ':' + date.getMinutes();
-        if (!avgMap[key]) avgMap[key] = [];
-        avgMap[key].push(parseFloat(f.field1));
-      });
-      const avgLabels = Object.keys(avgMap);
-      const avgData = avgLabels.map(k => {
-        const d = avgMap[k];
-        return d.reduce((a, b) => a + b) / d.length;
-      });
-
-      if (!chart2) {
-        const ctx2 = document.getElementById('avgChart').getContext('2d');
-        chart2 = new Chart(ctx2, {
-          type: 'line',
-          data: {
-            labels: avgLabels,
-            datasets: [{
-              label: 'pH TB',
-              data: avgData,
-              borderColor: 'purple',
-              backgroundColor: 'lavender',
-              pointRadius: 0
-            }]
-          },
-          options: {
-            responsive: true,
-            interaction: { mode: 'index', intersect: false },
-            plugins: { tooltip: { enabled: true }, legend: { display: false } },
-            scales: { x: { display: true }, y: { suggestedMin: 5, suggestedMax: 9 } }
-          }
-        });
-      } else {
-        chart2.data.labels = avgLabels;
-        chart2.data.datasets[0].data = avgData;
-        chart2.update();
-      }
-
-      // Trung bình theo giờ (Biểu đồ 3)
-      const hourlyMap = {};
-      feeds.forEach(f => {
-        const hour = new Date(f.created_at).getHours();
-        if (!hourlyMap[hour]) hourlyMap[hour] = [];
-        hourlyMap[hour].push(parseFloat(f.field1));
-      });
-      const hourlyLabels = Array.from({ length: 24 }, (_, i) => `${i}:00`);
-      const hourlyData = hourlyLabels.map(label => {
-        const h = parseInt(label);
-        const vals = hourlyMap[h] || [];
-        if (vals.length === 0) return null;
-        return vals.reduce((a, b) => a + b) / vals.length;
-      });
-
-      const barColors = hourlyData.map(val => getColor(val));
-
-      if (!chart3) {
-        const ctx3 = document.getElementById('hourlyChart').getContext('2d');
-        chart3 = new Chart(ctx3, {
-          type: 'bar',
-          data: {
-            labels: hourlyLabels,
-            datasets: [{
-              label: 'pH TB theo giờ',
-              data: hourlyData,
-              backgroundColor: barColors
-            }]
-          },
-          options: {
-            responsive: true,
-            plugins: {
-              legend: { display: false },
-              tooltip: { enabled: true },
-              datalabels: {
-                anchor: 'end',
-                align: 'top',
-                formatter: (val) => val?.toFixed(1) || '',
-                color: 'black'
-              }
-            },
-            scales: {
-              x: { display: true },
-              y: { suggestedMin: 5, suggestedMax: 9 }
-            }
-          },
-          plugins: [ChartDataLabels]
-        });
-      } else {
-        chart3.data.labels = hourlyLabels;
-        chart3.data.datasets[0].data = hourlyData;
-        chart3.data.datasets[0].backgroundColor = barColors;
-        chart3.update();
-      }
+    function exportChart(chartId) {
+      const link = document.createElement('a');
+      link.download = `${chartId}.png`;
+      link.href = document.getElementById(chartId).toDataURL();
+      link.click();
     }
 
     function downloadCSV() {
-      const feeds = loadFromLocalStorage();
-      let csv = 'Thời gian,pH\n';
-      feeds.forEach(f => csv += `${f.created_at},${f.field1}\n`);
-      const blob = new Blob([csv], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'du_lieu_ph.csv';
-      a.click();
+      if (!lastData.length) return;
+      let csv = "Thời gian,pH\n";
+      lastData.forEach(row => csv += `${row.time},${row.ph}\n`);
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "du_lieu_pH.csv";
+      link.click();
     }
 
-    fetchDataAndUpdateCharts();
-    setInterval(fetchDataAndUpdateCharts, 60 * 1000);
-  </script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
-</body>
+    function updateCharts() {
+      fetch(apiUrl)
+        .then(res => res.json())
+        .then(data => {
+          const feeds = data.feeds;
+          lastData = feeds.map(f => ({
+            time: new Date(f.created_at).toLocaleString(),
+            dateObj: new Date(f.created_at),
+            ph: parseFloat(f.field1)
+          })).filter(f => !isNaN(f.ph));
 
+          const timeLabels = lastData.map(f => f.time);
+          const phValues = lastData.map(f => f.ph);
+          const avgValues = movingAverage(phValues);
+
+          if (!realTimeChart) {
+            realTimeChart = new Chart(document.getElementById('realTimeChart').getContext('2d'), {
+              type: 'line',
+              data: {
+                labels: timeLabels,
+                datasets: [{
+                  label: 'pH thời gian thực',
+                  data: phValues,
+                  borderColor: 'blue',
+                  backgroundColor: 'rgba(0,0,255,0.1)',
+                  fill: true,
+                  tension: 0.3
+                }]
+              },
+              options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                  y: { suggestedMin: 5, suggestedMax: 9, title: { display: true, text: 'pH' } },
+                  x: { title: { display: true, text: 'Thời gian' } }
+                }
+              }
+            });
+          } else {
+            realTimeChart.data.labels = timeLabels;
+            realTimeChart.data.datasets[0].data = phValues;
+            realTimeChart.update();
+          }
+
+          if (!avgRollingChart) {
+            avgRollingChart = new Chart(document.getElementById('avgRollingChart').getContext('2d'), {
+              type: 'line',
+              data: {
+                labels: timeLabels,
+                datasets: [{
+                  label: 'pH trung bình trượt',
+                  data: avgValues,
+                  borderColor: 'green',
+                  backgroundColor: 'rgba(0,255,0,0.1)',
+                  fill: true,
+                  tension: 0.3
+                }]
+              },
+              options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                  y: { suggestedMin: 5, suggestedMax: 9, title: { display: true, text: 'pH' } },
+                  x: { title: { display: true, text: 'Thời gian' } }
+                }
+              }
+            });
+          } else {
+            avgRollingChart.data.labels = timeLabels;
+            avgRollingChart.data.datasets[0].data = avgValues;
+            avgRollingChart.update();
+          }
+
+          const hourlyData = Array.from({ length: 24 }, () => []);
+          lastData.forEach(d => hourlyData[d.dateObj.getHours()].push(d.ph));
+
+          const labels = Array.from({ length: 24 }, (_, i) => `${i}h`);
+          const avgPH = hourlyData.map(arr => arr.length ? parseFloat(calcAverage(arr)) : null);
+          const barColors = avgPH.map(ph => ph !== null ? getColor(ph) : 'gray');
+
+          const dateLabel = feeds[0] ? new Date(feeds[0].created_at).toLocaleDateString() : '';
+          document.getElementById('avgDateLabel').innerText = `📅 Dữ liệu ngày: ${dateLabel}`;
+
+          if (!avgHourChart) {
+            avgHourChart = new Chart(document.getElementById('avgHourChart').getContext('2d'), {
+              type: 'bar',
+              data: {
+                labels: labels,
+                datasets: [{
+                  label: 'Trung bình pH',
+                  data: avgPH,
+                  backgroundColor: barColors
+                }]
+              },
+              options: {
+                responsive: true,
+                plugins: {
+                  tooltip: {
+                    callbacks: {
+                      label: ctx => `Giờ ${ctx.label}: ${ctx.formattedValue}`
+                    }
+                  },
+                  legend: { display: false },
+                  datalabels: {
+                    anchor: 'end',
+                    align: 'end',
+                    color: '#000',
+                    font: { weight: 'bold', size: 10 },
+                    formatter: val => val !== null ? val : ''
+                  }
+                },
+                scales: {
+                  y: { suggestedMin: 5, suggestedMax: 9, title: { display: true, text: 'pH' } },
+                  x: { title: { display: true, text: 'Giờ (24h)' } }
+                }
+              },
+              plugins: [ChartDataLabels]
+            });
+          } else {
+            avgHourChart.data.labels = labels;
+            avgHourChart.data.datasets[0].data = avgPH;
+            avgHourChart.data.datasets[0].backgroundColor = barColors;
+            avgHourChart.update();
+          }
+        })
+        .catch(err => console.error("Lỗi tải dữ liệu:", err));
+    }
+
+    updateCharts();
+    setInterval(updateCharts, 60000); // reload mỗi 1 phút
+  </script>
+</body>
 </html>
