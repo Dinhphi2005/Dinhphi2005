@@ -12,8 +12,14 @@
       padding: 10px;
       background: #f4f4f4;
     }
+    .chart-scroll {
+      overflow-x: auto;
+      padding-bottom: 10px;
+    }
+    .chart-wrapper {
+      min-width: 600px; /* giúp có thanh cuộn nếu vượt quá màn hình nhỏ */
+    }
     canvas {
-      max-width: 100%;
       background: white;
       border-radius: 8px;
       box-shadow: 0 0 8px rgba(0,0,0,0.1);
@@ -44,26 +50,33 @@
   <!-- Biểu đồ 1: Dữ liệu thời gian thực -->
   <div class="chart-block">
     <h2>1️⃣ Biểu đồ thời gian thực</h2>
-    <canvas id="realTimeChart"></canvas>
+    <div class="chart-scroll"><div class="chart-wrapper">
+      <canvas id="realTimeChart"></canvas>
+    </div></div>
     <button onclick="exportChart('realTimeChart')">📥 Tải ảnh biểu đồ 1</button>
     <button onclick="downloadCSV()">📄 Tải dữ liệu CSV</button>
   </div>
 
-  <!-- Biểu đồ 2: Trung bình trượt theo thời gian -->
+  <!-- Biểu đồ 2: Trung bình trượt -->
   <div class="chart-block">
     <h2>2️⃣ Biểu đồ trung bình trượt</h2>
-    <canvas id="avgRollingChart"></canvas>
+    <div class="chart-scroll"><div class="chart-wrapper">
+      <canvas id="avgRollingChart"></canvas>
+    </div></div>
     <button onclick="exportChart('avgRollingChart')">📥 Tải ảnh biểu đồ 2</button>
   </div>
 
-  <!-- Biểu đồ 3: Trung bình pH theo 24 giờ -->
+  <!-- Biểu đồ 3: Trung bình pH theo giờ -->
   <div class="chart-block">
     <h2>3️⃣ Biểu đồ trung bình pH theo 24 giờ</h2>
-    <canvas id="avgHourChart"></canvas>
+    <div class="chart-scroll"><div class="chart-wrapper">
+      <canvas id="avgHourChart"></canvas>
+    </div></div>
     <button onclick="exportChart('avgHourChart')">📥 Tải ảnh biểu đồ 3</button>
     <div id="avgDateLabel" style="font-style: italic; margin-top: 5px;"></div>
   </div>
 
+  <!-- Script biểu đồ -->
   <script>
     const apiUrl = "https://api.thingspeak.com/channels/2987877/feeds.json?api_key=O9QSTEUK3OAJGEPX&results=200";
     let realTimeChart, avgRollingChart, avgHourChart;
@@ -252,7 +265,8 @@
     }
 
     updateCharts();
-    setInterval(updateCharts, 300000);
+    setInterval(updateCharts,  60 * 1000);
   </script>
 </body>
 </html>
+
