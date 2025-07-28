@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Dashboard pH – Thời gian thực & Trung bình theo giờ</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 10px;
+      background: #f4f4f4;
+    }
+    canvas {
+      max-width: 100%;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 0 8px rgba(0,0,0,0.1);
+      margin-bottom: 15px;
+    }
+    h2 {
+      font-size: 18px;
+      margin-top: 30px;
+    }
+    .chart-block {
+      margin-bottom: 40px;
+    }
+    button {
+      padding: 6px 10px;
+      margin: 6px 0;
+      background: #3498db;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <h1>📊 Dashboard giám sát pH</h1>
+
+  <!-- Biểu đồ 1: Dữ liệu thời gian thực -->
+  <div class="chart-block">
+    <h2>1️⃣ Biểu đồ thời gian thực</h2>
+    <canvas id="realTimeChart"></canvas>
+    <button onclick="exportChart('realTimeChart')">📥 Tải ảnh biểu đồ 1</button>
+    <button onclick="downloadCSV()">📄 Tải dữ liệu CSV</button>
+  </div>
+
+  <!-- Biểu đồ 2: Trung bình pH theo 24 giờ -->
+  <div class="chart-block">
+    <h2>2️⃣ Biểu đồ trung bình pH theo 24 giờ</h2>
+    <canvas id="avgHourChart"></canvas>
+    <button onclick="exportChart('avgHourChart')">📥 Tải ảnh biểu đồ 2</button>
+    <div id="avgDateLabel" style="font-style: italic; margin-top: 5px;"></div>
+  </div>
+
+  <script>
+    const apiUrl = "https://api.thingspeak.com/channels/2987877/feeds.json?api_key=O9QSTEUK3OAJGEPX&results=200";
+
+    let realTimeChart;
+    let avgHourChart;
+    let lastData = [];
+
+    function extractHour(dateStr) {
+      return new Date(dateStr).getHours();
+    }
+
+    function calcAverage(arr) {
+      const sum = arr.reduce((a, b) => a + b, 0);
+      return (sum / arr.length).toFixed(2);
+    }
+
+    function getColor(ph) {
+      if (ph < 6.5) return 'red';
+      else if (ph > 8.5) return 'orange';
+      return 'green';
+    }
+
+    function exportChart(chartId) {
+      const link = document.createElement('a');
+      link.download = `${chartId}.png`;
+      link.href = document.getElementById(chartId).toDataURL();
+      link.click();
+    }
+
+    function downloadCSV() {
+      if (!lastData || lastData.length === 0) return;
+      let csv = "Thời gian,pH\n";
+      lastData.forEach(row => {
+        csv += `${row.time},${row.ph}\n`;
+      });
+
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      link.setAttribute("href", url);
+      link.setAttribute("download", "du_lieu_pH.csv");
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    function updateCharts() {
+      fetch(apiUrl)
+        .then(res => res.json())
+        .then(data => {
+          const feeds = data.feeds;
+          lastData = feeds.map(f => ({
+            time: new Date(f.created_at).toLocaleString(),
+            ph: parseFloat(f.field1)
+          })).filter(f => !isNaN(f.ph));
+
+          // Biểu đồ 1 – Thời gian thực
+          const timeLabels = lastData.map(f => f.time);
+          const phValues = lastData.map(f => f.ph);
+
+          if (!realTimeChart) {
+            const ctx1 = document.getElementById('realTimeChart').getContext('2d');
+            realTimeChart = new Chart(ctx1, {
+              type: 'line',
+              data: {
+                labels: timeLabels,
+                datasets: [{
+                  label: 'pH thời gian thực',
+                  data: phValues,
+                  borderColor: 'blue',
+                  backgroundColor: 'rgba(0,0,255,0.1)',
+                  fill: true,
+                  tension: 0.3
+                }]
+              },
+              options: {
+                responsive: true,
+                scales: {
+                  y: { suggestedMin: 5, suggestedMax: 9, title: { display: true, text: 'pH' } },
+                  x: { title: { display: true, text: 'Thời gian' } }
+                }
+              }
+            });
+          } else {
+            realTimeChart.data.labels = timeLabels;
+            realTimeChart.data.datasets[0].data = phValues;
+            realTimeChart.update();
+          }
+
+          // Biểu đồ 2 – Trung bình theo 24h
+          const hourlyData = Array(24).fill().map(() => []);
+          lastData.forEach(d => {
+            const hour = new Date(d.time).getHours();
+            hourlyData[hour].push(d.ph);
+          });
+
+          const labels = Array.from({ length: 24 }, (_, i) => `${i}h`);
+          const avgPH = hourlyData.map(arr => arr.length ? parseFloat(calcAverage(arr)) : null);
+          const barColors = avgPH.map(ph => ph !== null ? getColor(ph) : 'gray');
+
+          const dateLabel = feeds[0] ? new Date(feeds[0].created_at).toLocaleDateString() : '';
+          document.getElementById('avgDateLabel').innerText = `📅 Dữ liệu ngày: ${dateLabel}`;
+
+          if (!avgHourChart) {
+            const ctx2 = document.getElementById('avgHourChart').getContext('2d');
+            avgHourChart = new Chart(ctx2, {
+              type: 'bar',
+              data: {
+                labels: labels,
+                datasets: [{
+                  label: 'Trung bình pH',
+                  data: avgPH,
+                  backgroundColor: barColors
+                }]
+              },
+              options: {
+                responsive: true,
+                plugins: {
+                  tooltip: {
+                    callbacks: {
+                      label: ctx => `Giờ ${ctx.label}: ${ctx.formattedValue}`
+                    }
+                  },
+                  legend: { display: false },
+                  datalabels: {
+                    anchor: 'end',
+                    align: 'end',
+                    color: '#000',
+                    font: { weight: 'bold', size: 10 },
+                    formatter: val => val !== null ? val : ''
+                  }
+                },
+                scales: {
+                  y: { suggestedMin: 5, suggestedMax: 9, title: { display: true, text: 'pH' } },
+                  x: { title: { display: true, text: 'Giờ (24h)' } }
+                }
+              },
+              plugins: [ChartDataLabels]
+            });
+          } else {
+            avgHourChart.data.labels = labels;
+            avgHourChart.data.datasets[0].data = avgPH;
+            avgHourChart.data.datasets[0].backgroundColor = barColors;
+            avgHourChart.update();
+          }
+        })
+        .catch(err => {
+          console.error("Lỗi tải dữ liệu:", err);
+        });
+    }
+
+    updateCharts();               // Tải lần đầu
+    setInterval(updateCharts, 300000);  // Tự động cập nhật mỗi 5 phút (300,000 ms)
+  </script>
+</body>
+</html>
